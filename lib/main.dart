@@ -9,6 +9,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:telephony/telephony.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
@@ -37,7 +38,7 @@ class SiriusSafeApp extends StatelessWidget {
   }
 }
 
-// --- TELA DE ENTRADA (SPLASH SCREEN) ---
+// --- TELA DE ABERTURA (SPLASH) ---
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
   @override
@@ -45,25 +46,14 @@ class SplashScreen extends StatefulWidget {
 }
 
 class _SplashScreenState extends State<SplashScreen> {
-  double _opacity = 0.0;
-
   @override
   void initState() {
     super.initState();
-    Future.delayed(const Duration(milliseconds: 500), () {
-      if (mounted) setState(() => _opacity = 1.0);
-    });
-
     Timer(const Duration(seconds: 3), () {
       if (mounted) {
         Navigator.pushReplacement(
-          context,
-          PageRouteBuilder(
-            pageBuilder: (context, anim, secAnim) => const MainNavigator(),
-            transitionsBuilder: (context, anim, secAnim, child) => 
-                FadeTransition(opacity: anim, child: child),
-            transitionDuration: const Duration(seconds: 1),
-          ),
+          context, 
+          MaterialPageRoute(builder: (context) => const MainNavigator())
         );
       }
     });
@@ -71,64 +61,24 @@ class _SplashScreenState extends State<SplashScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Container(
-        width: double.infinity,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF1A1A2E), Color(0xFF16213E)],
-          ),
-        ),
-        child: AnimatedOpacity(
-          duration: const Duration(seconds: 2),
-          opacity: _opacity,
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(25),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                        color: Colors.blueAccent.withOpacity(0.2),
-                        blurRadius: 40,
-                        spreadRadius: 10)
-                  ],
-                  border: Border.all(
-                      color: Colors.blueAccent.withOpacity(0.5), width: 1.5),
-                ),
-                child: const Icon(LucideIcons.shieldCheck,
-                    size: 90, color: Colors.blueAccent),
-              ),
-              const SizedBox(height: 30),
-              const Text(
-                "SIRIUS SAFE",
-                style: TextStyle(
-                    fontSize: 36,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 10,
-                    color: Colors.white),
-              ),
-              const SizedBox(height: 10),
-              Container(height: 2, width: 50, color: Colors.blueAccent),
-              const SizedBox(height: 20),
-              const Text(
-                "PROTEÇÃO INTELIGENTE",
-                style: TextStyle(
-                    color: Colors.white38, letterSpacing: 3, fontSize: 12),
-              ),
-            ],
-          ),
+    return const Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(LucideIcons.shieldCheck, size: 80, color: Colors.blueAccent),
+            SizedBox(height: 20),
+            Text("SIRIUS SAFE", 
+              style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, letterSpacing: 5)),
+            Text("SEGURANÇA TOTAL", style: TextStyle(color: Colors.white24, fontSize: 10)),
+          ],
         ),
       ),
     );
   }
 }
 
-// --- NAVEGADOR PRINCIPAL ---
+// --- NAVEGADOR ---
 class MainNavigator extends StatefulWidget {
   const MainNavigator({super.key});
   @override
@@ -145,11 +95,10 @@ class _MainNavigatorState extends State<MainNavigator> {
       body: _pages[_selectedIndex],
       bottomNavigationBar: NavigationBar(
         backgroundColor: const Color(0xFF16213E),
-        indicatorColor: Colors.redAccent.withOpacity(0.2),
         selectedIndex: _selectedIndex,
         onDestinationSelected: (index) => setState(() => _selectedIndex = index),
         destinations: const [
-          NavigationDestination(icon: Icon(LucideIcons.zap), label: 'Emergência'),
+          NavigationDestination(icon: Icon(LucideIcons.zap), label: 'SOS'),
           NavigationDestination(icon: Icon(LucideIcons.users), label: 'Contatos'),
         ],
       ),
@@ -157,65 +106,80 @@ class _MainNavigatorState extends State<MainNavigator> {
   }
 }
 
-// --- PÁGINA DO BOTÃO SOS ---
+// --- PÁGINA SOS ---
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
   @override
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin {
+class _HomePageState extends State<HomePage> {
   bool _isSending = false;
-  late AnimationController _controller;
   final Telephony telephony = Telephony.instance;
 
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-        vsync: this, duration: const Duration(seconds: 1))
-      ..repeat(reverse: true);
+  Future<Position?> _getUniversalLocation() async {
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) return null;
+    }
+    try {
+      return await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 7),
+      );
+    } catch (e) {
+      return await Geolocator.getLastKnownPosition();
+    }
   }
 
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  Future<void> _dispararSOS() async {
+  Future<void> _dispararSOS({bool viaWhatsApp = false}) async {
     final prefs = await SharedPreferences.getInstance();
     final String? contactsJson = prefs.getString('contacts_list');
+    List<dynamic> contacts = contactsJson != null ? jsonDecode(contactsJson) : [];
 
-    if (contactsJson == null || jsonDecode(contactsJson).isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("⚠️ Adicione contatos primeiro!")));
+    if (contacts.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Adicione um contato primeiro!")));
       return;
     }
 
-    HapticFeedback.heavyImpact();
     setState(() => _isSending = true);
 
+    Position? pos = await _getUniversalLocation();
+    String mapLink = pos != null 
+        ? "https://www.google.com/maps?q=${pos.latitude},${pos.longitude}"
+        : "[Localização não disponível]";
+
+    String mensagem = "🚨 SOS SIRIUS SAFE!\nPreciso de ajuda urgente. Minha localização: $mapLink";
+
     try {
-      Position pos = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.high);
-      String mapUrl = "https://www.google.com/maps?q=${pos.latitude},${pos.longitude}";
+      if (viaWhatsApp) {
+        String phone = contacts[0]['phone'];
+        
+        // --- CORREÇÃO DE DDD E NÚMERO ---
+        // Remove tudo que não for número
+        String cleanPhone = phone.replaceAll(RegExp(r'[^0-9]'), '');
+        
+        // Se o número tiver 10 ou 11 dígitos (DDD + Número), adiciona o 55 (Brasil)
+        if (cleanPhone.length >= 10 && !cleanPhone.startsWith('55')) {
+          cleanPhone = "55$cleanPhone";
+        }
 
-      List<dynamic> contacts = jsonDecode(contactsJson);
-      for (var contact in contacts) {
-        await telephony.sendSms(
-          to: contact['phone'],
-          message: "🚨 SOS SIRIUS SAFE!\nPreciso de ajuda urgente. Minha localização: $mapUrl",
-        );
-      }
-
-      if (mounted) {
-        Navigator.push(context,
-            MaterialPageRoute(builder: (context) => const AlertSentPage()));
+        final url = "https://wa.me/$cleanPhone?text=${Uri.encodeComponent(mensagem)}";
+        if (await canLaunchUrl(Uri.parse(url))) {
+          await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+        }
+      } else {
+        bool? canSend = await telephony.requestPhoneAndSmsPermissions;
+        if (canSend == true) {
+          for (var c in contacts) {
+            await telephony.sendSms(to: c['phone'], message: mensagem);
+          }
+          if (mounted) Navigator.push(context, MaterialPageRoute(builder: (context) => const AlertSentPage()));
+        }
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Erro ao enviar alertas de segurança.")));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Erro: $e")));
     } finally {
       setState(() => _isSending = false);
     }
@@ -223,76 +187,45 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-          gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Color(0xFF1A1A2E), Color(0xFF0F3460)])),
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-            backgroundColor: Colors.transparent,
-            title: const Text("SIRIUS SAFE",
-                style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 2)),
-            centerTitle: true),
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Text("EM CASO DE PERIGO, TOQUE ABAIXO",
-                  style: TextStyle(color: Colors.white38, letterSpacing: 1.2)),
-              const SizedBox(height: 50),
-              GestureDetector(
-                onTap: _isSending ? null : _dispararSOS,
-                child: AnimatedBuilder(
-                  animation: _controller,
-                  builder: (context, child) {
-                    return Container(
-                      width: 240,
-                      height: 240,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                              color: Colors.redAccent.withOpacity(0.2 * _controller.value),
-                              blurRadius: 40,
-                              spreadRadius: 25 * _controller.value)
-                        ],
-                        gradient: const LinearGradient(
-                            begin: Alignment.topLeft,
-                            colors: [Color(0xFFFF416C), Color(0xFFFF4B2B)]),
-                      ),
-                      child: Center(
-                        child: _isSending
-                            ? const CircularProgressIndicator(color: Colors.white)
-                            : const Text("SOS",
-                                style: TextStyle(
-                                    fontSize: 55,
-                                    fontWeight: FontWeight.w900,
-                                    color: Colors.white)),
-                      ),
-                    );
-                  },
+    return Scaffold(
+      appBar: AppBar(title: const Text("SIRIUS SAFE"), centerTitle: true),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Text("SISTEMA DE EMERGÊNCIA ATIVO", style: TextStyle(color: Colors.white54)),
+            const SizedBox(height: 60),
+            GestureDetector(
+              onTap: _isSending ? null : () => _dispararSOS(),
+              child: Container(
+                width: 200, height: 200,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.redAccent.withOpacity(0.1),
+                  border: Border.all(color: Colors.redAccent, width: 2),
+                ),
+                child: Center(
+                  child: _isSending 
+                      ? const CircularProgressIndicator() 
+                      : const Text("SOS", style: TextStyle(fontSize: 40, fontWeight: FontWeight.bold, color: Colors.redAccent)),
                 ),
               ),
-              const SizedBox(height: 60),
-              const Icon(LucideIcons.radio, color: Colors.redAccent, size: 20),
-              const SizedBox(height: 8),
-              const Text("MONITORAMENTO ATIVO",
-                  style: TextStyle(
-                      color: Colors.redAccent,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12)),
-            ],
-          ),
+            ),
+            const SizedBox(height: 40),
+            ElevatedButton.icon(
+              onPressed: () => _dispararSOS(viaWhatsApp: true),
+              icon: const Icon(LucideIcons.messageCircle),
+              label: const Text("SOS VIA WHATSAPP"),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+            )
+          ],
         ),
       ),
     );
   }
 }
 
-// --- PÁGINA DE CONTATOS ---
+// --- TELA DE CONTATOS ---
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
   @override
@@ -300,96 +233,65 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  List<Map<String, String>> _contacts = [];
+  List<dynamic> _contacts = [];
 
   @override
   void initState() {
     super.initState();
-    _loadContacts();
+    _load();
   }
 
-  Future<void> _loadContacts() async {
+  _load() async {
     final prefs = await SharedPreferences.getInstance();
-    final data = prefs.getString('contacts_list');
-    if (data != null) {
-      setState(() => _contacts = List<Map<String, String>>.from(
-          jsonDecode(data).map((item) => Map<String, String>.from(item))));
-    }
+    setState(() => _contacts = jsonDecode(prefs.getString('contacts_list') ?? "[]"));
   }
 
-  void _addContact() {
-    final nameCtrl = TextEditingController();
-    final phoneCtrl = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1A2E),
-        title: const Text("Novo Contato"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: "Nome")),
-            TextField(controller: phoneCtrl, decoration: const InputDecoration(labelText: "Telefone"), keyboardType: TextInputType.phone),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancelar")),
-          ElevatedButton(
-            onPressed: () async {
-              if (nameCtrl.text.isNotEmpty && phoneCtrl.text.isNotEmpty) {
-                setState(() => _contacts.add({'name': nameCtrl.text, 'phone': phoneCtrl.text}));
-                final prefs = await SharedPreferences.getInstance();
-                await prefs.setString('contacts_list', jsonEncode(_contacts));
-                Navigator.pop(context);
-              }
-            },
-            child: const Text("Salvar")
-          ),
-        ],
-      ),
-    );
+  _save() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('contacts_list', jsonEncode(_contacts));
   }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-          gradient: LinearGradient(colors: [Color(0xFF1A1A2E), Color(0xFF16213E)])),
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(backgroundColor: Colors.transparent, title: const Text("CONTATOS")),
-        floatingActionButton: FloatingActionButton.extended(
-            onPressed: _addContact,
-            backgroundColor: Colors.blueAccent,
-            icon: const Icon(Icons.person_add),
-            label: const Text("ADICIONAR")),
-        body: _contacts.isEmpty
-            ? const Center(child: Text("Sua rede de apoio está vazia.", style: TextStyle(color: Colors.white38)))
-            : ListView.builder(
-                padding: const EdgeInsets.all(20),
-                itemCount: _contacts.length,
-                itemBuilder: (context, index) => Card(
-                  color: Colors.white.withOpacity(0.05),
-                  child: ListTile(
-                    leading: const CircleAvatar(child: Icon(Icons.person)),
-                    title: Text(_contacts[index]['name']!),
-                    subtitle: Text(_contacts[index]['phone']!),
-                    trailing: IconButton(
-                        icon: const Icon(Icons.delete, color: Colors.redAccent),
-                        onPressed: () async {
-                          setState(() => _contacts.removeAt(index));
-                          final prefs = await SharedPreferences.getInstance();
-                          await prefs.setString('contacts_list', jsonEncode(_contacts));
-                        }),
-                  ),
-                ),
-              ),
+    return Scaffold(
+      appBar: AppBar(title: const Text("CONTATOS")),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () {
+          final n = TextEditingController();
+          final p = TextEditingController();
+          showDialog(context: context, builder: (c) => AlertDialog(
+            title: const Text("Adicionar"),
+            content: Column(mainAxisSize: MainAxisSize.min, children: [
+              TextField(controller: n, decoration: const InputDecoration(hintText: "Nome")),
+              TextField(controller: p, decoration: const InputDecoration(hintText: "DDD + Número"), keyboardType: TextInputType.phone),
+            ]),
+            actions: [ElevatedButton(onPressed: () {
+              if (n.text.isNotEmpty && p.text.isNotEmpty) {
+                setState(() => _contacts.add({"name": n.text, "phone": p.text}));
+                _save();
+                Navigator.pop(context);
+              }
+            }, child: const Text("Salvar"))],
+          ));
+        },
+        child: const Icon(Icons.add),
+      ),
+      body: ListView.builder(
+        itemCount: _contacts.length,
+        itemBuilder: (c, i) => ListTile(
+          title: Text(_contacts[i]['name']),
+          subtitle: Text(_contacts[i]['phone']),
+          trailing: IconButton(icon: const Icon(Icons.delete), onPressed: () {
+            setState(() => _contacts.removeAt(i));
+            _save();
+          }),
+        ),
       ),
     );
   }
 }
 
-// --- PÁGINA DE ALERTA ENVIADO ---
+// --- TELA SUCESSO ---
 class AlertSentPage extends StatelessWidget {
   const AlertSentPage({super.key});
   @override
@@ -399,22 +301,10 @@ class AlertSentPage extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(LucideIcons.checkCircle2, color: Colors.greenAccent, size: 100),
-            const SizedBox(height: 30),
-            const Text("SISTEMA ACIONADO!",
-                style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 50),
-            ElevatedButton.icon(
-              onPressed: () => launchUrl(Uri.parse("tel:190")),
-              icon: const Icon(Icons.phone),
-              label: const Text("LIGAR 190"),
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15)),
-            ),
-            const SizedBox(height: 20),
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text("VOLTAR")),
+            const Icon(Icons.check_circle, color: Colors.green, size: 80),
+            const Text("ALERTA ENVIADO!", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 40),
+            ElevatedButton(onPressed: () => Navigator.pop(context), child: const Text("VOLTAR")),
           ],
         ),
       ),
